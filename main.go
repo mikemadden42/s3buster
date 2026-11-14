@@ -1,10 +1,12 @@
+// Package main implements s3buster, a simple S3 bucket recon tool that
+// resolves candidate bucket hostnames and attempts to list their contents.
 package main
 
 import (
 	"bufio"
 	"encoding/xml"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -60,21 +62,33 @@ func lookup(host string) {
 	}
 }
 
-func list(host string) {
-	response, err := http.Get(host)
+func list(url string) {
+	response, err := http.Get(url) //nolint:gosec // URL is built from the wordlist; this is the tool's intended behavior.
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return
+	}
+	defer func() {
+		if cerr := response.Body.Close(); cerr != nil {
+			log.Println(cerr)
+		}
+	}()
+
+	if response.StatusCode != http.StatusOK {
+		log.Printf("%s: unexpected status %s", url, response.Status)
+		return
 	}
 
-	responseData, err := ioutil.ReadAll(response.Body)
+	responseData, err := io.ReadAll(response.Body)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return
 	}
 
 	var results ListBucketResult
-	err = xml.Unmarshal(responseData, &results)
-	if err != nil {
-		log.Fatal(err)
+	if err = xml.Unmarshal(responseData, &results); err != nil {
+		log.Println(err)
+		return
 	}
 
 	for _, result := range results.Contents {
