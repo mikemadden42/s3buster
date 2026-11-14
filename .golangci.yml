@@ -1,7 +1,7 @@
-version: 2
+version: "2"
 
 linters:
-  disable-all: true
+  default: none
   enable:
     # --- The Critical Checks (Gap Fixers) ---
     - errcheck # Catches your file.Close errors
@@ -9,23 +9,25 @@ linters:
     - revive # Catches your missing comment issues
     - govet # Standard Go vetting
 
+  settings:
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+
+  exclusions:
+    paths:
+      - third_party
+      - builtin
+      - examples
+
 formatters:
   enable:
     - gofmt
     - goimports
 
-linters-settings:
-  revive:
-    rules:
-      - name: exported
-        arguments:
-          - disableStutteringCheck
-
-  goimports:
-    local-prefixes: github.com/mikemadden42
-
-issues:
-  exclude-dirs:
-    - third_party
-    - builtin
-    - examples
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/mikemadden42
