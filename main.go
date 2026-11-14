@@ -5,13 +5,19 @@ package main
 import (
 	"bufio"
 	"encoding/xml"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"time"
 )
+
+// httpClient enforces a timeout so a single unresponsive host cannot
+// stall the whole scan.
+var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 type ListBucketResult struct {
 	XMLName     xml.Name `xml:"ListBucketResult"`
@@ -33,14 +39,29 @@ type ListBucketResult struct {
 }
 
 func main() {
-	file, err := os.Open("words.txt")
+	wordlist := flag.String("wordlist", "words.txt", "path to the file of candidate bucket names")
+	region := flag.String("region", "us-west-1", "AWS region of the S3 endpoint")
+	flag.Parse()
+
+	file, err := os.Open(*wordlist)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer func() {
+		if cerr := file.Close(); cerr != nil {
+			log.Println(cerr)
+		}
+	}()
+
+	suffix := fmt.Sprintf(".s3-%s.amazonaws.com", *region)
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		host := scanner.Text() + ".s3-us-west-1.amazonaws.com"
+		name := scanner.Text()
+		if name == "" {
+			continue
+		}
+		host := name + suffix
 		fmt.Println(host)
 		lookup(host)
 		list("http://" + host)
@@ -63,7 +84,7 @@ func lookup(host string) {
 }
 
 func list(url string) {
-	response, err := http.Get(url) //nolint:gosec // URL is built from the wordlist; this is the tool's intended behavior.
+	response, err := httpClient.Get(url) //nolint:gosec // URL is built from the wordlist; this is the tool's intended behavior.
 	if err != nil {
 		log.Println(err)
 		return
