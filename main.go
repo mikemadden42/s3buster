@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/xml"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -41,7 +43,12 @@ type ListBucketResult struct {
 func main() {
 	wordlist := flag.String("wordlist", "words.txt", "path to the file of candidate bucket names")
 	region := flag.String("region", "us-west-1", "AWS region of the S3 endpoint")
+	concurrency := flag.Int("concurrency", 10, "number of hosts to scan in parallel")
 	flag.Parse()
+
+	if *concurrency < 1 {
+		log.Fatal("concurrency must be at least 1")
+	}
 
 	file, err := os.Open(*wordlist)
 	if err != nil {
@@ -55,35 +62,62 @@ func main() {
 
 	suffix := fmt.Sprintf(".s3-%s.amazonaws.com", *region)
 
+	hosts := make(chan string)
+
+	// Serialize stdout so each host's output stays grouped.
+	var outMu sync.Mutex
+	var wg sync.WaitGroup
+	for i := 0; i < *concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for host := range hosts {
+				out := scan(host)
+				outMu.Lock()
+				_, _ = os.Stdout.Write(out)
+				outMu.Unlock()
+			}
+		}()
+	}
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		name := scanner.Text()
 		if name == "" {
 			continue
 		}
-		host := name + suffix
-		fmt.Println(host)
-		lookup(host)
-		list("http://" + host)
+		hosts <- name + suffix
 	}
+	close(hosts)
+	wg.Wait()
 
 	if err = scanner.Err(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func lookup(host string) {
+// scan resolves and lists a single host, returning its collected output so
+// callers can emit it atomically.
+func scan(host string) []byte {
+	var buf bytes.Buffer
+	fmt.Fprintln(&buf, host)
+	lookup(&buf, host)
+	list(&buf, "http://"+host)
+	return buf.Bytes()
+}
+
+func lookup(w io.Writer, host string) {
 	hosts, err := net.LookupHost(host)
 	if err != nil {
 		log.Println(err)
 	}
 
 	for _, host := range hosts {
-		fmt.Println(host)
+		_, _ = fmt.Fprintln(w, host)
 	}
 }
 
-func list(url string) {
+func list(w io.Writer, url string) {
 	response, err := httpClient.Get(url) //nolint:gosec // URL is built from the wordlist; this is the tool's intended behavior.
 	if err != nil {
 		log.Println(err)
@@ -113,7 +147,7 @@ func list(url string) {
 	}
 
 	for _, result := range results.Contents {
-		fmt.Printf("key: %s, size: %s\n", result.Key, result.Size)
+		_, _ = fmt.Fprintf(w, "key: %s, size: %s\n", result.Key, result.Size)
 	}
 }
 
