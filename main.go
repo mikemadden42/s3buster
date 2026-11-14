@@ -85,8 +85,8 @@ func list(url string) {
 		return
 	}
 
-	var results ListBucketResult
-	if err = xml.Unmarshal(responseData, &results); err != nil {
+	results, err := parseListBucketResult(responseData)
+	if err != nil {
 		log.Println(err)
 		return
 	}
@@ -94,4 +94,13 @@ func list(url string) {
 	for _, result := range results.Contents {
 		fmt.Printf("key: %s, size: %s\n", result.Key, result.Size)
 	}
+}
+
+// parseListBucketResult unmarshals an S3 ListBucketResult XML document.
+func parseListBucketResult(data []byte) (ListBucketResult, error) {
+	var results ListBucketResult
+	if err := xml.Unmarshal(data, &results); err != nil {
+		return ListBucketResult{}, err
+	}
+	return results, nil
 }
